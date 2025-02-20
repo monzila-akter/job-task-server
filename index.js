@@ -52,6 +52,20 @@ async function run() {
         res.json(tasks);
       });
 
+         //  POST - Add a Task**
+    app.post("/tasks", async (req, res) => {
+        const { title, description, status } = req.body;
+        if (!title || title.length > 50) return res.status(400).json({ error: "Title is required (max 50 chars)" });
+        if (description && description.length > 200) return res.status(400).json({ error: "Description max 200 chars" });
+  
+        const newTask = { title, description, status, createdAt: new Date() };
+        const result = await taskCollection.insertOne(newTask);
+  
+        // Send real-time update
+        io.emit("task-updated");
+        res.json(result);
+      });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
