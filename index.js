@@ -66,6 +66,35 @@ async function run() {
         res.json(result);
       });
 
+        // PUT - Update a Task**
+        app.put("/tasks/:id", async (req, res) => {
+            const { id } = req.params;
+            const { title, description, status } = req.body;
+      
+            await taskCollection.updateOne({ _id: new ObjectId(id) }, { $set: { title, description, status } });
+      
+            // Send real-time update
+            io.emit("task-updated");
+            res.json({ message: "Task updated" });
+          });
+
+            // DELETE - Remove a Task**
+    app.delete("/tasks/:id", async (req, res) => {
+        const { id } = req.params;
+        await taskCollection.deleteOne({ _id: new ObjectId(id) });
+  
+        // Send real-time update
+        io.emit("task-updated");
+        res.json({ message: "Task deleted" });
+      });
+  
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  
+  
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
