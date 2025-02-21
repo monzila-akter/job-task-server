@@ -36,6 +36,7 @@ async function run() {
     // await client.connect();
 
      const taskCollection = client.db("TaskDB").collection("tasks");
+     const userCollection = client.db("TaskDB").collection("users");
 
         //  **WebSocket Connection**
     io.on("connection", (socket) => {
@@ -45,6 +46,32 @@ async function run() {
           console.log("User disconnected ");
         });
       });
+
+// post user data
+      app.post("/users", async (req, res) => {
+        const { uid, email, displayName } = req.body;
+      
+        if (!uid || !email || !displayName) {
+          return res.status(400).json({ error: "Missing user details" });
+        }
+      
+        try {
+          const existingUser = await userCollection.findOne({ uid });
+      
+          if (!existingUser) {
+            const newUser = { uid, email, displayName, createdAt: new Date() };
+            await userCollection.insertOne(newUser);
+            return res.status(201).json({ message: "User added successfully" });
+          }
+      
+          res.status(200).json({ message: "User already exists" });
+        } catch (error) {
+          console.error("Error saving user:", error);
+          res.status(500).json({ error: "Failed to save user" });
+        }
+      });
+      
+
  // GET - Retrieve Tasks
  app.get("/tasks", async (req, res) => {
     try {
