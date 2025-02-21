@@ -33,7 +33,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
      const taskCollection = client.db("TaskDB").collection("tasks");
 
@@ -100,21 +100,40 @@ app.put("/tasks/:id", async (req, res) => {
         res.status(500).json({ error: "Failed to update task" });
     }
 });
-app.put('/tasks/reorder', async (req, res) => {
+
+app.put("/tasks/reorder/:id", async (req, res) => {
     try {
-      const tasks = req.body.reorderedTasks; // Array of tasks with updated order
-      // Update the task order in the database
-      await tasks.bulkWrite(
-        tasks.map((task) => ({
-          updateOne: {
-            filter: { _id: task._id },
-            update: { $set: { order: task.order, status: task.status } },
-          },
-        }))
+      const { order } = req.body; // Updated order value
+      const taskId = req.params.id; // Task ID from the URL
+      console.log("order", order, "taskId", taskId);
+  
+      // Validate if 'order' is provided
+      if (typeof order === "undefined") {
+        return res.status(400).json({ error: "Order value is required" });
+      }
+  
+      // Check if the taskId is a valid ObjectId
+      if (!ObjectId.isValid(taskId)) {
+        return res.status(400).json({ error: "Invalid Task ID format" });
+      }
+  
+      // Find the task by its ID and update only the 'order' field
+      const updatedTask = await taskCollection.updateOne(
+        { _id: new ObjectId(taskId) }, // Convert string to ObjectId
+        { $set: { order: order } } // Update the 'order' field
       );
-      res.status(200).send('Tasks reordered successfully');
+      console.log("updateTask", updatedTask);
+  
+      if (updatedTask.modifiedCount === 0) {
+        return res
+          .status(404)
+          .json({ error: "Task not found or no changes made" });
+      }
+  
+      res.status(200).json({ message: "Task order updated successfully" });
     } catch (error) {
-      res.status(500).send('Error updating task order');
+      console.error("Error updating task order:", error);
+      res.status(500).json({ error: "Error updating task order" });
     }
   });
   
@@ -135,8 +154,8 @@ app.put('/tasks/reorder', async (req, res) => {
   
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
