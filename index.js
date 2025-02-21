@@ -72,25 +72,28 @@ async function run() {
       });
       
 
- // GET - Retrieve Tasks
- app.get("/tasks", async (req, res) => {
+// GET - Retrieve Tasks for a specific user
+app.get("/tasks/:uid", async (req, res) => {
+    const { uid } = req.params;
     try {
-      const tasks = await taskCollection.find().toArray();
-      res.json(tasks);
+        const tasks = await taskCollection.find({ uid }).toArray();
+        res.json(tasks);
     } catch (error) {
-      console.error("Error retrieving tasks:", error);
-      res.status(500).json({ error: "Failed to retrieve tasks" });
+        console.error("Error retrieving tasks:", error);
+        res.status(500).json({ error: "Failed to retrieve tasks" });
     }
-  });
+});
 
- // POST - Add a Task (Include order field)
+
+// POST - Add a Task (Include order field and uid)
 app.post("/tasks", async (req, res) => {
-    const { title, description, status } = req.body;
+    const { title, description, status, uid } = req.body;
 
     if (!title || title.length > 50) return res.status(400).json({ error: "Title is required (max 50 chars)" });
     if (description && description.length > 200) return res.status(400).json({ error: "Description max 200 chars" });
+    if (!uid) return res.status(400).json({ error: "User ID is required" });
 
-    const newTask = { title, description, status, createdAt: new Date(), order: 0 }; // Adding default order
+    const newTask = { title, description, status, createdAt: new Date(), order: 0, uid }; // Adding default order and uid
     try {
         const result = await taskCollection.insertOne(newTask);
         io.emit("task-updated");
@@ -101,7 +104,7 @@ app.post("/tasks", async (req, res) => {
     }
 });
 
- // PUT - Update Task (Edit & Drag Functionality Combined)
+// PUT - Update Task (Edit & Drag Functionality Combined)
 app.put("/tasks/:id", async (req, res) => {
     const { id } = req.params;
     const updateFields = req.body; // Can contain title, description, or status
@@ -164,19 +167,19 @@ app.put("/tasks/reorder/:id", async (req, res) => {
     }
   });
   
-  // DELETE - Remove a Task
-  app.delete("/tasks/:id", async (req, res) => {
+  
+// DELETE - Remove a Task
+app.delete("/tasks/:id", async (req, res) => {
     const { id } = req.params;
     try {
-      const result = await taskCollection.deleteOne({ _id: new ObjectId(id) });
-      io.emit("task-updated");
-      res.json({ message: "Task deleted" });
+        const result = await taskCollection.deleteOne({ _id: new ObjectId(id) });
+        io.emit("task-updated");
+        res.json({ message: "Task deleted" });
     } catch (error) {
-      console.error("Error deleting task:", error);
-      res.status(500).json({ error: "Failed to delete task" });
+        console.error("Error deleting task:", error);
+        res.status(500).json({ error: "Failed to delete task" });
     }
-  });
-
+});
           
   
 
