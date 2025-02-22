@@ -72,11 +72,13 @@ async function run() {
       });
       
 
-// GET - Retrieve Tasks for a specific user
-app.get("/tasks/:uid", async (req, res) => {
-    const { uid } = req.params;
+ // GET - Retrieve Tasks for a Specific User
+app.get("/tasks", async (req, res) => {
+    const { uid } = req.query; // Get uid from query params
+    if (!uid) return res.status(400).json({ error: "User ID is required" });
+
     try {
-        const tasks = await taskCollection.find({ uid }).toArray();
+        const tasks = await taskCollection.find({ uid }).toArray(); // Fetch tasks only for this user
         res.json(tasks);
     } catch (error) {
         console.error("Error retrieving tasks:", error);
@@ -84,46 +86,59 @@ app.get("/tasks/:uid", async (req, res) => {
     }
 });
 
-
-// POST - Add a Task (Include order field and uid)
 app.post("/tasks", async (req, res) => {
     const { title, description, status, uid } = req.body;
-
+  
     if (!title || title.length > 50) return res.status(400).json({ error: "Title is required (max 50 chars)" });
     if (description && description.length > 200) return res.status(400).json({ error: "Description max 200 chars" });
     if (!uid) return res.status(400).json({ error: "User ID is required" });
-
-    const newTask = { title, description, status, createdAt: new Date(), order: 0, uid }; // Adding default order and uid
+  
     try {
-        const result = await taskCollection.insertOne(newTask);
-        io.emit("task-updated");
-        res.json(result);
+      // Find the maximum order value for tasks in the same column
+      const maxOrderTask = await taskCollection
+        .find({ status, uid }) // Filter by status and user ID
+        .sort({ order: -1 }) // Sort in descending order
+        .limit(1)
+        .toArray();
+  
+      const newOrder = maxOrderTask.length > 0 ? maxOrderTask[0].order + 1 : 0; // Set the new order
+  
+      const newTask = { title, description, status, createdAt: new Date(), order: newOrder, uid }; // Add order field
+      const result = await taskCollection.insertOne(newTask);
+  
+      io.emit("task-updated"); // Notify all clients about the change
+      res.json(result);
     } catch (error) {
-        console.error("Error adding task:", error);
-        res.status(500).json({ error: "Failed to add task" });
+      console.error("Error adding task:", error);
+      res.status(500).json({ error: "Failed to add task" });
     }
-});
+  });
 
-// PUT - Update Task (Edit & Drag Functionality Combined)
+ // PUT - Update Task (Only for the task owner)
 app.put("/tasks/:id", async (req, res) => {
     const { id } = req.params;
-    const updateFields = req.body; // Can contain title, description, or status
+    const { uid, ...updateFields } = req.body; // Extract uid and other fields
 
-    if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ error: "Invalid Task ID" });
-    }
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: "Invalid Task ID" });
+    if (!uid) return res.status(400).json({ error: "User ID is required" });
 
     try {
+        // Check if the task belongs to the user
+        const task = await taskCollection.findOne({ _id: new ObjectId(id) });
+        if (!task || task.uid !== uid) {
+            return res.status(403).json({ error: "You are not authorized to update this task" });
+        }
+
         const result = await taskCollection.updateOne(
             { _id: new ObjectId(id) },
-            { $set: updateFields } // Dynamically update provided fields
+            { $set: updateFields }
         );
 
         if (result.modifiedCount === 0) {
             return res.status(404).json({ error: "Task not found or not modified" });
         }
 
-        io.emit("task-updated"); // Notify all clients about the change
+        io.emit("task-updated");
         res.json({ message: "Task updated successfully" });
     } catch (error) {
         console.error("Error updating task:", error);
@@ -133,9 +148,8 @@ app.put("/tasks/:id", async (req, res) => {
 
 app.put("/tasks/reorder/:id", async (req, res) => {
     try {
-      const { order } = req.body; // Updated order value
+      const { order, status, uid } = req.body; // Updated order and status
       const taskId = req.params.id; // Task ID from the URL
-      console.log("order", order, "taskId", taskId);
   
       // Validate if 'order' is provided
       if (typeof order === "undefined") {
@@ -147,31 +161,60 @@ app.put("/tasks/reorder/:id", async (req, res) => {
         return res.status(400).json({ error: "Invalid Task ID format" });
       }
   
-      // Find the task by its ID and update only the 'order' field
-      const updatedTask = await taskCollection.updateOne(
-        { _id: new ObjectId(taskId) }, // Convert string to ObjectId
-        { $set: { order: order } } // Update the 'order' field
-      );
-      console.log("updateTask", updatedTask);
-  
-      if (updatedTask.modifiedCount === 0) {
-        return res
-          .status(404)
-          .json({ error: "Task not found or no changes made" });
+      // Check if the task belongs to the user
+      const task = await taskCollection.findOne({ _id: new ObjectId(taskId) });
+      if (!task || task.uid !== uid) {
+        return res.status(403).json({ error: "You are not authorized to update this task" });
       }
   
+      // Update the task's order and status
+      const updatedTask = await taskCollection.updateOne(
+        { _id: new ObjectId(taskId) },
+        { $set: { order, status } } // Update both order and status
+      );
+  
+      if (updatedTask.modifiedCount === 0) {
+        return res.status(404).json({ error: "Task not found or no changes made" });
+      }
+  
+      // Reorder all tasks in the same column
+      const tasksInColumn = await taskCollection
+        .find({ status, uid }) // Filter by status and user ID
+        .sort({ order: 1 }) // Sort in ascending order
+        .toArray();
+  
+      tasksInColumn.forEach(async (task, index) => {
+        if (task.order !== index) {
+          await taskCollection.updateOne(
+            { _id: task._id },
+            { $set: { order: index } } // Update the order field
+          );
+        }
+      });
+  
+      io.emit("task-updated"); // Notify all clients about the change
       res.status(200).json({ message: "Task order updated successfully" });
     } catch (error) {
       console.error("Error updating task order:", error);
       res.status(500).json({ error: "Error updating task order" });
     }
   });
-  
-  
-// DELETE - Remove a Task
+
+ // DELETE - Remove a Task (Only for the task owner)
 app.delete("/tasks/:id", async (req, res) => {
     const { id } = req.params;
+    const { uid } = req.body; // Get uid from request body
+
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: "Invalid Task ID" });
+    if (!uid) return res.status(400).json({ error: "User ID is required" });
+
     try {
+        // Check if the task belongs to the user
+        const task = await taskCollection.findOne({ _id: new ObjectId(id) });
+        if (!task || task.uid !== uid) {
+            return res.status(403).json({ error: "You are not authorized to delete this task" });
+        }
+
         const result = await taskCollection.deleteOne({ _id: new ObjectId(id) });
         io.emit("task-updated");
         res.json({ message: "Task deleted" });
@@ -180,7 +223,6 @@ app.delete("/tasks/:id", async (req, res) => {
         res.status(500).json({ error: "Failed to delete task" });
     }
 });
-          
   
 
     // Send a ping to confirm a successful connection
